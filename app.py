@@ -2,11 +2,13 @@ import numpy as np
 import dash
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
+from datetime import datetime
 import plotly.graph_objects as go
 from scipy.optimize import minimize
 import os
 
-
+APP_VERSION = "1.0.0"  # Change this to your current version
+LAST_UPDATED = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 clicked_points = set()  # Track clicked points for removal
 
@@ -101,7 +103,13 @@ x_data, y_data, z_data = generate_data(n_points=100, noise=0.1, outlier_ratio=0.
 
 # Update the layout to include the fitted model selection
 app.layout = html.Div([
-    html.H1("3D Fit with Least Squares"),
+    html.Div([
+        html.H1("3D Fit with Least Squares"),
+        html.Div([
+            html.P(f"Version: {APP_VERSION}", style={"margin-right": "15px", "display": "inline"}),
+            html.P(f"Last Updated: {LAST_UPDATED}", style={"display": "inline"})
+        ], style={"position": "absolute", "top": "10px", "right": "20px", "textAlign": "right", "fontSize": "14px"})
+    ], style={"position": "relative"}),
     html.Div([
         html.Div([
             html.Label("True Model Complexity:"),
