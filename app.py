@@ -7,8 +7,6 @@ from scipy.optimize import minimize
 import os
 
 
-app = dash.Dash(__name__)
-server = app.server  # Expose Flask server for Gunicorn
 
 clicked_points = set()  # Track clicked points for removal
 
@@ -94,6 +92,7 @@ def fit_function(x, y, z, degree, fit_type, regularization=0, reg_type="L2", cos
 
 # Create Dash app
 app = dash.Dash(__name__)
+server = app.server  # Expose Flask server for Gunicorn
 app.title = "3D Fit with Least Squares"
 
 # Global data
