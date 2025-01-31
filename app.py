@@ -5,6 +5,12 @@ from dash.dependencies import Input, Output, State
 import plotly.graph_objects as go
 from scipy.optimize import minimize
 
+
+from dash import Dash
+
+app = Dash(__name__)  # Your Dash app instance
+server = app.server   # Expose Flask server for Gunicorn
+
 clicked_points = set()  # Track clicked points for removal
 
 # Generate synthetic data for fitting
