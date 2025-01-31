@@ -4,12 +4,11 @@ from dash import dcc, html
 from dash.dependencies import Input, Output, State
 import plotly.graph_objects as go
 from scipy.optimize import minimize
+import os
 
 
-from dash import Dash
-
-app = Dash(__name__)  # Your Dash app instance
-server = app.server   # Expose Flask server for Gunicorn
+app = dash.Dash(__name__)
+server = app.server  # Expose Flask server for Gunicorn
 
 clicked_points = set()  # Track clicked points for removal
 
@@ -322,4 +321,6 @@ def update_plot(fit_type, degree, true_complexity, n_points, noise, outlier_rati
     return fig, metrics, cost_equation
 # Run the app
 if __name__ == "__main__":
-    app.run_server(debug=True)
+    app.run_server(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+
+    
