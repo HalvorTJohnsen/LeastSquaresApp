@@ -6,11 +6,14 @@ from datetime import datetime
 import plotly.graph_objects as go
 from scipy.optimize import minimize
 import os
+import copy
 
 APP_VERSION = "1.0.0"  # Change this to your current version
 LAST_UPDATED = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 clicked_points = set()  # Track clicked points for removal
+
+
 
 # Generate synthetic data for fitting
 def generate_data(n_points=100, noise=0.1, outlier_ratio=0, true_complexity=2):
@@ -109,9 +112,21 @@ app.title = "3D Fit with Least Squares"
 # Global data
 x_data, y_data, z_data = generate_data(n_points=100, noise=0.1, outlier_ratio=0.1)
 
+@app.callback(
+    Output("debug-output", "children"),
+    Input("add-point-button", "n_clicks"),
+    prevent_initial_call=True
+)
+def test_button(n_clicks):
+    print("DEBUG: Button callback fired!")
+    return f"Button clicked {n_clicks} times"
+
+
 
 # Update the layout to include the fitted model selection
 app.layout = html.Div([
+    dcc.Store(id="stored-data"),
+    html.Div(id="debug-output", style={"marginTop": "10px", "color": "green"}),
     html.Div([
         html.H1("3D Fit with Least Squares"),
         html.Div([
@@ -169,12 +184,26 @@ app.layout = html.Div([
             dcc.Slider(id="degree-slider", min=1, max=5, step=1, value=2, marks={i: str(i) for i in range(1, 6)}),
         ], style={"marginBottom": "20px"}),
         html.Div([
-            html.Label("Number of Points:"),
+            html.Label("Number of Samples:"),
             dcc.Input(id="npoints-input", type="number", value=100, min=10, max=1000, step=10),
         ], style={"marginBottom": "20px"}),
         html.Div([
             html.Label("Standard deviation of the noise:"),
-            dcc.Slider(id="noise-slider", min=0, max=1, step=0.1, value=0.1, marks={i / 10: str(i / 10) for i in range(11)}),
+            dcc.Slider(
+                id="noise-slider",
+                min=-4,
+                max=1,
+                step=0.5,
+                value=-1,
+                marks={
+                    -4: "10⁻⁴",
+                    -3: "10⁻³",
+                    -2: "10⁻²",
+                    -1: "10⁻¹",
+                    0: "1",
+                    1: "10"
+                },
+            ),
         ], style={"marginBottom": "20px"}),
         html.Div([
             html.Label("Outlier Ratio:"),
@@ -185,10 +214,10 @@ app.layout = html.Div([
             dcc.Slider(
                 id="regularization-slider",
                 min=-4,
-                max=0,
+                max=5,  # ✅ now goes from 10^-4 to 10^5
                 step=0.5,
                 value=-1,
-                marks={i: f"10^{i}" for i in range(-4, 1)}
+                marks={i: f"10^{i}" for i in range(-4, 6)},  # ✅ include 5
             ),
         ], style={"marginBottom": "20px"}),
         html.Div([
@@ -217,16 +246,11 @@ app.layout = html.Div([
             ),
         ], style={"marginBottom": "20px"}),
         html.Div([
-            html.Label("Manually Add a Point:"),
+            html.Label("Manually Add a Sample:"),
             html.Div(dcc.Input(id="input-x", type="number", placeholder="x", debounce=True), style={"marginBottom": "10px"}),
             html.Div(dcc.Input(id="input-y", type="number", placeholder="y", debounce=True), style={"marginBottom": "10px"}),
             html.Div(dcc.Input(id="input-z", type="number", placeholder="z", debounce=True), style={"marginBottom": "10px"}),
             html.Button("Add Point", id="add-point-button", n_clicks=0),
-            dcc.Store(id="stored-data", data={
-                "x": x_data.tolist(),
-                "y": y_data.tolist(),
-                "z": z_data.tolist()
-            })
         ], style={"marginTop": "30px"}),
 
     ], style={"margin": "20px", "width": "40%", "display": "inline-block", "verticalAlign": "top"}),
@@ -237,7 +261,6 @@ app.layout = html.Div([
     ], style={"width": "55%", "display": "inline-block", "verticalAlign": "top"}),
 ])
 
-# Modify callback function to include the true model relationship
 @app.callback(
     [Output("3d-plot", "figure"),
      Output("metrics-output", "children"),
@@ -251,45 +274,58 @@ app.layout = html.Div([
      Input("regularization-slider", "value"),
      Input("regtype-dropdown", "value"),
      Input("cost-dropdown", "value"),
-     Input("plot-dimension-toggle", "value")],  # 👈 added this
+     Input("plot-dimension-toggle", "value"),
+     Input("stored-data", "data")],
     [State("3d-plot", "figure")]
 )
-def update_plot(fit_type, degree, true_complexity, n_points, noise, outlier_ratio, regularization, reg_type, cost_function, plot_dim, current_figure):
 
-    global x_data, y_data, z_data
+def update_plot(fit_type, degree, true_complexity, n_points, noise, outlier_ratio, regularization, reg_type, cost_function, plot_dim, current_figure, stored_data):
+    # Ensure stored_data has x, y, z
+    # Handle missing or corrupted stored data
+    noise = 10 ** noise
     regularization = 10 ** regularization
 
-    print("===== DEBUGGING INFO =====")
-    print(f"Received fit_type: '{fit_type}'")  # Check what is actually received
-    print(f"Available fit_types: {list(fit_types.keys())}")  # Print the dictionary keys
+    if stored_data is None or not all(k in stored_data for k in ("x", "y", "z")):
+        print("stored_data missing or incomplete, generating fresh data")
+        x_data, y_data, z_data = generate_data(n_points, noise, outlier_ratio, true_complexity)
+        stored_data = {"x": x_data.tolist(), "y": y_data.tolist(), "z": z_data.tolist()}
+    else:
+        print(f"Using stored data: {len(stored_data['x'])} points")
+        x_data = np.array(stored_data["x"])
+        y_data = np.array(stored_data["y"])
+        z_data = np.array(stored_data["z"])
+
+    print(f"Using stored data: {len(x_data)} points")
+    print("Raw stored_data in update_plot:", stored_data)
+
+    # print("===== DEBUGGING INFO =====")
+    # print(f"Received fit_type: '{fit_type}'")  # Check what is actually received
+    # print(f"Available fit_types: {list(fit_types.keys())}")  # Print the dictionary keys
     
-    # Check if the issue is a hidden whitespace problem
-    if fit_type.strip() not in fit_types:
-        print(f"Possible whitespace issue: '{fit_type}' != '{fit_type.strip()}'")
+    # # Check if the issue is a hidden whitespace problem
+    # if fit_type.strip() not in fit_types:
+    #     print(f"Possible whitespace issue: '{fit_type}' != '{fit_type.strip()}'")
     
-    # Check if it is a case-sensitivity issue
-    lowercase_keys = {k.lower(): k for k in fit_types.keys()}  # Create a mapping of lowercase keys
-    if fit_type.lower() in lowercase_keys:
-        corrected_fit_type = lowercase_keys[fit_type.lower()]
-        print(f"Case issue detected. Converting '{fit_type}' to '{corrected_fit_type}'")
-        fit_type = corrected_fit_type  # Fix it automatically
+    # # Check if it is a case-sensitivity issue
+    # lowercase_keys = {k.lower(): k for k in fit_types.keys()}  # Create a mapping of lowercase keys
+    # if fit_type.lower() in lowercase_keys:
+    #     corrected_fit_type = lowercase_keys[fit_type.lower()]
+    #     print(f"Case issue detected. Converting '{fit_type}' to '{corrected_fit_type}'")
+    #     fit_type = corrected_fit_type  # Fix it automatically
 
-    # Check final condition before raising an error
-    if fit_type not in fit_types:
-        print(f"!!! ERROR: fit_type '{fit_type}' is missing from fit_types at runtime !!!")
-        print(f"Full fit_types dictionary at error moment: {fit_types}")
+    # # Check final condition before raising an error
+    # if fit_type not in fit_types:
+    #     print(f"!!! ERROR: fit_type '{fit_type}' is missing from fit_types at runtime !!!")
+    #     print(f"Full fit_types dictionary at error moment: {fit_types}")
 
-        # Explicitly check if 'linear' is accessible
-        if "linear" in fit_types:
-            print(f"fit_types['linear'] is accessible: {fit_types['linear']}")
-        else:
-            print("WARNING: 'linear' is missing from fit_types despite being listed!")
+    #     # Explicitly check if 'linear' is accessible
+    #     if "linear" in fit_types:
+    #         print(f"fit_types['linear'] is accessible: {fit_types['linear']}")
+    #     else:
+    #         print("WARNING: 'linear' is missing from fit_types despite being listed!")
 
-        raise ValueError(f"Unsupported fit type: {fit_type}")
+    #     raise ValueError(f"Unsupported fit type: {fit_type}")
 
-
-    # Generate data based on true model complexity
-    x_data, y_data, z_data = generate_data(n_points, noise, outlier_ratio, true_complexity)
 
     # Fit the data using the chosen model
     params, cost_val = fit_function(x_data, y_data, z_data, degree, fit_type, regularization, reg_type, cost_function)
@@ -414,17 +450,22 @@ def update_plot(fit_type, degree, true_complexity, n_points, noise, outlier_rati
 @app.callback(
     Output("stored-data", "data"),
     Input("add-point-button", "n_clicks"),
+    State("stored-data", "data"),
     State("input-x", "value"),
     State("input-y", "value"),
     State("input-z", "value"),
-    State("stored-data", "data"),
     prevent_initial_call=True
 )
-def add_manual_point(n_clicks, x_val, y_val, z_val, data):
-    if x_val is not None and y_val is not None and z_val is not None:
-        data["x"].append(x_val)
-        data["y"].append(y_val)
-        data["z"].append(z_val)
+def add_manual_point(n_clicks, data, x_input, y_input, z_input):
+    print("Triggered add_manual_point callback")
+    if x_input is None or y_input is None or z_input is None:
+        raise dash.exceptions.PreventUpdate
+    print(f"Adding point: ({x_input}, {y_input}, {z_input})")
+    if data is None or not all(k in data for k in ("x", "y", "z")):
+        data = {"x": [], "y": [], "z": []}
+    data["x"].append(x_input)
+    data["y"].append(y_input)
+    data["z"].append(z_input)
     return data
 
 
