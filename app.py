@@ -78,6 +78,15 @@ def fit_function(x, y, z, degree, fit_type, regularization=0, reg_type="L2", cos
             regularization_term = regularization * np.sum(params ** 2)
         elif reg_type == "L0":
             regularization_term = regularization * np.sum(params != 0)
+        elif reg_type == "None":
+            regularization_term = 0
+        elif reg_type == "elasticnet":
+            alpha = 0.5  # You can make this adjustable later
+            l1_term = np.sum(np.abs(params))
+            l2_term = np.sum(params ** 2)
+            regularization_term = regularization * (alpha * l1_term + (1 - alpha) * l2_term)
+
+
         
         if cost_function == 'squared':
             return np.sum(residuals ** 2) + regularization_term
@@ -111,8 +120,20 @@ app.layout = html.Div([
         ], style={"position": "absolute", "top": "10px", "right": "20px", "textAlign": "right", "fontSize": "14px"})
     ], style={"position": "relative"}),
     html.Div([
+        html.Label("Plot Type:"),
+        dcc.RadioItems(
+            id="plot-dimension-toggle",
+            options=[
+                {"label": "3D", "value": "3D"},
+                {"label": "2D", "value": "2D"},
+            ],
+            value="3D",  # Default view
+            labelStyle={"display": "inline-block", "margin-right": "10px"}
+        )
+    ], style={"marginBottom": "20px"}),
+    html.Div([
         html.Div([
-            html.Label("True Model Complexity:"),
+            html.Label("True Model Type:"),
             dcc.Slider(
                 id="complexity-slider",
                 min=1,
@@ -144,7 +165,7 @@ app.layout = html.Div([
 
         ], style={"marginBottom": "20px"}),
         html.Div([
-            html.Label("Degree (For Polynomial Only):"),
+            html.Label("Degree (For Polynomials only):"),
             dcc.Slider(id="degree-slider", min=1, max=5, step=1, value=2, marks={i: str(i) for i in range(1, 6)}),
         ], style={"marginBottom": "20px"}),
         html.Div([
@@ -152,7 +173,7 @@ app.layout = html.Div([
             dcc.Input(id="npoints-input", type="number", value=100, min=10, max=1000, step=10),
         ], style={"marginBottom": "20px"}),
         html.Div([
-            html.Label("Noise:"),
+            html.Label("Standard deviation of the noise:"),
             dcc.Slider(id="noise-slider", min=0, max=1, step=0.1, value=0.1, marks={i / 10: str(i / 10) for i in range(11)}),
         ], style={"marginBottom": "20px"}),
         html.Div([
@@ -160,18 +181,31 @@ app.layout = html.Div([
             dcc.Slider(id="outlier-slider", min=0, max=0.5, step=0.05, value=0.1, marks={i / 10: str(i / 10) for i in range(6)}),
         ], style={"marginBottom": "20px"}),
         html.Div([
-            html.Label("Regularization:"),
-            dcc.Slider(id="regularization-slider", min=0, max=1, step=0.1, value=0.1, marks={i / 10: str(i / 10) for i in range(11)}),
+            html.Label("Regularization parameter:"),
+            dcc.Slider(
+                id="regularization-slider",
+                min=-4,
+                max=0,
+                step=0.5,
+                value=-1,
+                marks={i: f"10^{i}" for i in range(-4, 1)}
+            ),
         ], style={"marginBottom": "20px"}),
         html.Div([
             html.Label("Regularization Type:"),
             dcc.Dropdown(
                 id="regtype-dropdown",
-                options=[{"label": "L0", "value": "L0"},
-                         {"label": "L1", "value": "L1"},
-                         {"label": "L2", "value": "L2"}],
+                options=[
+                    {"label": "None", "value": "None"},
+                    {"label": "L0", "value": "L0"},
+                    {"label": "L1", "value": "L1"},
+                    {"label": "L2", "value": "L2"},
+                    {"label": "Elastic Net", "value": "elasticnet"}  # ✅ Add this line
+                ],
                 value="L2"
             ),
+
+
         ], style={"marginBottom": "20px"}),
         html.Div([
             html.Label("Cost Function:"),
@@ -182,6 +216,19 @@ app.layout = html.Div([
                 value="squared"
             ),
         ], style={"marginBottom": "20px"}),
+        html.Div([
+            html.Label("Manually Add a Point:"),
+            html.Div(dcc.Input(id="input-x", type="number", placeholder="x", debounce=True), style={"marginBottom": "10px"}),
+            html.Div(dcc.Input(id="input-y", type="number", placeholder="y", debounce=True), style={"marginBottom": "10px"}),
+            html.Div(dcc.Input(id="input-z", type="number", placeholder="z", debounce=True), style={"marginBottom": "10px"}),
+            html.Button("Add Point", id="add-point-button", n_clicks=0),
+            dcc.Store(id="stored-data", data={
+                "x": x_data.tolist(),
+                "y": y_data.tolist(),
+                "z": z_data.tolist()
+            })
+        ], style={"marginTop": "30px"}),
+
     ], style={"margin": "20px", "width": "40%", "display": "inline-block", "verticalAlign": "top"}),
     html.Div([
         dcc.Graph(id="3d-plot"),
@@ -203,11 +250,14 @@ app.layout = html.Div([
      Input("outlier-slider", "value"),
      Input("regularization-slider", "value"),
      Input("regtype-dropdown", "value"),
-     Input("cost-dropdown", "value")],
+     Input("cost-dropdown", "value"),
+     Input("plot-dimension-toggle", "value")],  # 👈 added this
     [State("3d-plot", "figure")]
 )
-def update_plot(fit_type, degree, true_complexity, n_points, noise, outlier_ratio, regularization, reg_type, cost_function, current_figure):
+def update_plot(fit_type, degree, true_complexity, n_points, noise, outlier_ratio, regularization, reg_type, cost_function, plot_dim, current_figure):
+
     global x_data, y_data, z_data
+    regularization = 10 ** regularization
 
     print("===== DEBUGGING INFO =====")
     print(f"Received fit_type: '{fit_type}'")  # Check what is actually received
@@ -261,12 +311,15 @@ def update_plot(fit_type, degree, true_complexity, n_points, noise, outlier_rati
     else:
         hypothesis_text = ""
 
-    # Define cost function text
-    reg_term = {
+    reg_term_map = {
         "L0": "||β||₀",
         "L1": "||β||₁",
-        "L2": "||β||₂²"
-    }[reg_type]
+        "L2": "||β||₂²",
+        "elasticnet": "0.5 · ||β||₁ + 0.5 · ||β||₂²",
+        "None": "0"
+    }
+    reg_term = reg_term_map.get(reg_type, "0")
+
 
     if cost_function == "squared":
         cost_text = f"J(β) = Σ(zᵢ - ẑᵢ)² + {regularization} · {reg_term}"
@@ -292,40 +345,89 @@ def update_plot(fit_type, degree, true_complexity, n_points, noise, outlier_rati
         print(f"Available types: {list(fit_types.keys())}")
         raise ValueError(f"Unsupported fit type: {fit_type}")
 
+    if plot_dim == "2D":
+        # Generate a clean grid of y values
+        y_line = np.linspace(-1, 1, 100)
+        x_fixed = np.mean(x_data)
+        
+        # Build the design matrix for fixed x and sweeping y
+        X_line = fit_types[fit_type](np.full_like(y_line, x_fixed), y_line, degree)
+        z_line = X_line @ params
 
+        fig = go.Figure()
 
+        # Add the actual noisy data (still showing model/data mismatch)
+        sorted_idx = np.argsort(y_data)
+        fig.add_trace(go.Scatter(x=y_data[sorted_idx], y=z_data[sorted_idx],
+                                mode="markers", name="Data Points"))
 
-    fig = go.Figure()
+        # Add the clean, fixed-x model prediction
+        fig.add_trace(go.Scatter(x=y_line, y=z_line,
+                                mode="lines", name="Model Fit"))
 
-    fig.add_trace(go.Scatter3d(x=x_data, y=y_data, z=z_data, mode='markers', marker=dict(size=5, color='red'), name='Data Points'))
-    fig.add_trace(go.Surface(x=x_plot, y=y_plot, z=z_plot, colorscale='Viridis', opacity=0.7, name='Fit Surface'))
+        fig.update_layout(
+            title="2D View (z vs y, x fixed)",
+            xaxis_title="x",  # We still rename it
+            yaxis_title="y",
+            margin=dict(l=0, r=0, b=0, t=40)
+        )
 
-    if current_figure and "scene" in current_figure.get("layout", {}):
-        fig.update_layout(scene_camera=current_figure["layout"]["scene"].get("camera", {}))
+    else:
+        fig = go.Figure()
+        fig.add_trace(go.Scatter3d(x=x_data, y=y_data, z=z_data,
+                                mode='markers', marker=dict(size=5, color='red'), name='Data Points'))
+        fig.add_trace(go.Surface(x=x_plot, y=y_plot, z=z_plot,
+                                colorscale='Viridis', opacity=0.7, name='Fit Surface'))
 
-    fig.update_layout(
-        scene=dict(
-            xaxis_title='X',
-            yaxis_title='Y',
-            zaxis_title='Z',
-        ),
-        margin=dict(l=0, r=0, b=0, t=40),
-    )
+        if current_figure and "scene" in current_figure.get("layout", {}):
+            fig.update_layout(scene_camera=current_figure["layout"]["scene"].get("camera", {}))
+
+        fig.update_layout(
+            scene=dict(
+                xaxis_title='X',
+                yaxis_title='Y',
+                zaxis_title='Z',
+            ),
+            margin=dict(l=0, r=0, b=0, t=40),
+        )
+
 
     residual_error = np.sum((z_data - z_fit) ** 2)
     metrics = [
         html.P(f"Cost Function Value: {cost_val:.4f}"),
         html.P(f"Residual Error (Sum of Squared Residuals): {residual_error:.4f}"),
     ]
-
     cost_equation = html.Div([
-        html.P("Hypothesis Function:"),
+        html.P("True Model:"),
+        html.Pre("Generated internally based on selected complexity.", style={"fontSize": "16px", "whiteSpace": "pre-wrap"}),
+
+        html.P("Estimated Model:"),
         html.Pre(hypothesis_text, style={"fontSize": "16px", "whiteSpace": "pre-wrap"}),
+
         html.P("Cost Function:"),
         html.Pre(cost_text, style={"fontSize": "16px", "whiteSpace": "pre-wrap"}),
     ])
 
+
     return fig, metrics, cost_equation
+
+@app.callback(
+    Output("stored-data", "data"),
+    Input("add-point-button", "n_clicks"),
+    State("input-x", "value"),
+    State("input-y", "value"),
+    State("input-z", "value"),
+    State("stored-data", "data"),
+    prevent_initial_call=True
+)
+def add_manual_point(n_clicks, x_val, y_val, z_val, data):
+    if x_val is not None and y_val is not None and z_val is not None:
+        data["x"].append(x_val)
+        data["y"].append(y_val)
+        data["z"].append(z_val)
+    return data
+
+
 # Run the app
 if __name__ == "__main__":
     app.run_server(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
